@@ -18,8 +18,8 @@ def scrape_atcoder_problem(url):
     if task_statement:
         # テキストのみ抽出（数式はLaTeX形式のまま残ることが多いのでLLMには好都合）
         raw_text = task_statement.get_text(separator="\n", strip=True)
-        print("\n=== 問題文 (冒頭500文字) ===")
-        print(raw_text[:500] + "...")
+        print("\n=== 問題文 (冒頭1000文字) ===")
+        print(raw_text[:1000] + "...")
     else:
         print("日本語の問題文が見つかりませんでした。")
         raw_text = ""
@@ -63,9 +63,9 @@ def scrape_atcoder_problem(url):
     return raw_text, editorial_link
 
 if __name__ == "__main__":
-    # 実験1: 最近の問題 (ABC340 C) -> HTML解説のはず
+    # 実験1: 最近の問題 (ABC445 C) -> HTML解説のはず
     print("--- Case 1: Recent Problem ---")
-    scrape_atcoder_problem("https://atcoder.jp/contests/abc340/tasks/abc340_c")
+    scrape_atcoder_problem("https://atcoder.jp/contests/abc445/tasks/abc445_c")
     # 実験2: 少し古い問題 (ABC100 C) -> PDF解説の可能性が高い
     print("\n\n--- Case 2: Older Problem ---")
     scrape_atcoder_problem("https://atcoder.jp/contests/abc100/tasks/abc100_c")

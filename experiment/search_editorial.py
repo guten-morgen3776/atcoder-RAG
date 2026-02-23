@@ -57,8 +57,8 @@ def scrape_official_editorial(contest_id, problem_id):
     
     if main_content:
         text = main_content.get_text(separator="\n", strip=True)
-        print("\n=== 解説本文 (冒頭500文字) ===")
-        print(text[:500] + "...")
+        print("\n=== 解説本文 (冒頭1000文字) ===")
+        print(text[:1000] + "...")
         return text
     else:
         print("本文のコンテナが見つかりませんでした。")
