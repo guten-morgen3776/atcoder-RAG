@@ -148,26 +148,26 @@ def run(
                     logger.exception("Scraping failed for %s", pid)
                     console_error(f"[ERROR] {pid}: Failed at Scraping ({e!s})")
 
-        if force_re_scrape or not intermediate.get("gemini_extract"):
-            time.sleep(4)  # Gemini API RPM 制限回避。スクレイプの有無に関わらず LLM 呼び出し直前に必ず待機（中間JSON からのリカバリー時も 4 秒間隔を保証）
-            try:
-                gemini_extract = extract_keywords_and_summary(
+            if force_re_scrape or not intermediate.get("gemini_extract"):
+                time.sleep(4)  # Gemini API RPM 制限回避。スクレイプの有無に関わらず LLM 呼び出し直前に必ず待機（中間JSON からのリカバリー時も 4 秒間隔を保証）
+                try:
+                    gemini_extract = extract_keywords_and_summary(
                     intermediate.get("problem_statement_ja", ""),
                     intermediate.get("editorial_text"),
                 )
-                intermediate["gemini_extract"] = gemini_extract
-                save_intermediate(pid, intermediate, raw_data_dir)
-                if gemini_extract:
-                    console_info(f"[INFO] {pid}: LLM Success")
-                else:
+                    intermediate["gemini_extract"] = gemini_extract
+                    save_intermediate(pid, intermediate, raw_data_dir)
+                    if gemini_extract:
+                        console_info(f"[INFO] {pid}: LLM Success")
+                    else:
+                        row["llm_status"] = "NG"
+                        row["error_message"] = (row.get("error_message") or "") + " LLM returned None."
+                        console_error(f"[ERROR] {pid}: LLM returned None")
+                except Exception as e:
                     row["llm_status"] = "NG"
-                    row["error_message"] = (row.get("error_message") or "") + " LLM returned None."
-                    console_error(f"[ERROR] {pid}: LLM returned None")
-            except Exception as e:
-                row["llm_status"] = "NG"
-                row["error_message"] = (row.get("error_message") or "") + f" LLM: {e!s}"
-                logger.exception("LLM extract failed for %s", pid)
-                console_error(f"[ERROR] {pid}: Failed at LLM ({e!s})")
+                    row["error_message"] = (row.get("error_message") or "") + f" LLM: {e!s}"
+                    logger.exception("LLM extract failed for %s", pid)
+                    console_error(f"[ERROR] {pid}: Failed at LLM ({e!s})")
 
             report_rows.append(row)
             all_processed_metas.append(meta)

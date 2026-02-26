@@ -7,7 +7,7 @@ from google.genai import types
 
 from src.config import get_gemini_api_key
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 
 def extract_keywords_and_summary(
