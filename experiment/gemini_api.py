@@ -18,7 +18,7 @@ if not GOOGLE_API_KEY:
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # モデルの初期化 (2.5 Flashが使える環境なら 'gemini-2.5-flash' に変更推奨)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def extract_keywords_with_gemini(problem_text, editorial_text=""):
     print("Gemini APIにデータを送信中...")

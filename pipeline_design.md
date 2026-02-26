@@ -33,11 +33,16 @@ atcoder-RAG/
 │   ├── scrape.py            # 問題文・解説のスクレイピング
 │   ├── llm_extract.py       # Gemini によるキーワード/要約抽出
 │   ├── embedding_db.py      # Embedding 関数・ChromaDB 操作
+│   ├── logging_report.py   # ロギング・処理レポート（Non-blocking）
 │   └── models.py            # 共通データ型（TypedDict / dataclass）
 │
 ├── data/                    # 中間データ（任意で gitignore）
 │   └── raw/                 # 1問1JSON の中間ファイル
 │       └── {problem_id}.json
+│
+├── logs/                    # ログ・レポート出力
+│   ├── app.log              # アプリケーションログ（Traceback・デバッグ）
+│   └── report.jsonl         # 処理レポート（1問1行・構造化、失敗ID抽出用）
 │
 ├── atcoder_rag_db/          # ChromaDB 永続化先（make_DB_plan 通り）
 │
@@ -52,7 +57,8 @@ atcoder-RAG/
 | `scrape.py` | 問題ページの HTML 取得・問題文抽出（`#task-statement span.lang-ja`）、解説一覧ページの取得・公式HTML解説の特定・解説本文取得。**すべての AtCoder 向け requests の前後に `time.sleep(2)`、ヘッダーに `Accept-Language: ja` を付与。** |
 | `llm_extract.py` | **`google-genai`** を使用。問題文＋解説（あれば）を渡し、`response_mime_type="application/json"` で algorithms / keywords / time_complexity / summary を抽出。解説なしでも問題文のみで推論。 |
 | `embedding_db.py` | **`google-genai`** の Embedding（`models/embedding-001`, `task_type="RETRIEVAL_DOCUMENT"`）を用いた ChromaDB 用 Embedding 関数。戻り値は **`[e.values for e in response.embeddings]`**。PersistentClient で `./atcoder_rag_db` に upsert。既存 id 一覧取得で差分更新のためのインターフェースを提供。 |
-| `run_batch.py` | CLI で「コンテスト ID」「問題インデックス範囲（例: C〜F）」を受け取り、上記モジュールを順に呼び出すオーケストレーション。 |
+| `logging_report.py` | **堅牢なロギング・レポート**。アプリログ（`logs/app.log`）の設定、処理レポート（`logs/report.jsonl`）の行追記・一括書き出し。**Non-blocking**: ログ/レポート処理は `try-except` でガードし、失敗してもメインパイプラインを止めない。コンソール進捗（`[INFO]` / `[ERROR]`）の安全な出力。 |
+| `run_batch.py` | CLI で「コンテスト ID」「問題インデックス範囲（例: C〜F）」を受け取り、上記モジュールを順に呼び出すオーケストレーション。ログ初期化・レポート行収集・コンソール出力を含む。 |
 
 ---
 
@@ -187,6 +193,43 @@ IntermediateProblem = {
 
 ---
 
+### 4.7 ロギング・レポート（logging_report.py）※堅牢性・Non-blocking
+
+#### 4.7.1 ログの目的と分離
+
+| 種類 | 出力先 | 内容 |
+|------|--------|------|
+| **アプリケーションログ** | `logs/app.log` | Python 標準 `logging` を使用。エラー詳細（Traceback 含む）・デバッグ情報。 |
+| **処理レポート** | `logs/report.jsonl`（または `report.csv`） | バッチ処理の結果を構造化。1問1行。失敗IDの抽出・再実行用。 |
+
+**レポートのカラム（例）**
+
+- `problem_id`, `scrape_status` (OK/NG), `llm_status` (OK/NG), `db_upsert_status` (OK/NG), `error_message`
+- JSONL の場合は 1 行 1 JSON オブジェクト。実行ごとに上書きまたは run_id 付きで追記し、後から「失敗した ID だけ」を grep やフィルタで抽出できるようにする。
+
+#### 4.7.2 安全性（Non-blocking）
+
+- ログ出力やレポート書き込みで例外が発生しても、**メインのDB構築パイプライン（スクレイピング・ベクトル化・upsert）を停止させない**。
+- ログ／レポート用の処理は必ず **`try-except`** でガードし、失敗時は標準エラーに短いメッセージを出すか静かに無視する。
+
+#### 4.7.3 コンソール出力
+
+- 実行者が進捗を把握できるよう、次のいずれか（または両方）を設計に含める。
+  - **プログレスバー**: tqdm 等で「何問目 / 全体」を表示。
+  - **シンプルな標準出力**: 例として `[INFO] abc400_c: Success` / `[ERROR] abc400_d: Failed at Scraping (reason)`。これも try-except でガードし、コンソール出力の失敗でパイプラインが落ちないようにする。
+
+#### 4.7.4 関数仕様（案）
+
+| 関数 | 説明 | 引数 | 戻り値 |
+|------|------|------|--------|
+| `setup_logging(log_dir)` | `logs/` を作成し、`logging` を設定。ファイルハンドラで `app.log` に出力。 | `log_dir: str`（例: `"logs"`） | なし |
+| `get_logger(name)` | 設定済みロガーを返す。 | `name: str` | `logging.Logger` |
+| `write_report_row(row, report_path)` | レポートに 1 行（1 JSON オブジェクト）を追記。**try-except でガード**。 | `row: dict`, `report_path: str` | なし |
+| `write_report_rows(rows, report_path)` | レポートを一括書き出し（実行終了時のまとめ用）。**try-except でガード**。 | `rows: list[dict]`, `report_path: str` | なし |
+| `console_info(msg)`, `console_error(msg)` | 標準出力／標準エラーに進捗・エラーを出す。**try-except でガード**。 | `msg: str` | なし |
+
+---
+
 ## 5. メインバッチ処理フロー（run_batch.py）
 
 ### 5.1 CLI 引数（例）
@@ -197,11 +240,13 @@ IntermediateProblem = {
 - `--db-path`: ChromaDB の保存先（デフォルト: `./atcoder_rag_db`）
 - `--skip-existing`: 既に ChromaDB に id が存在する問題をスキップする（デフォルト: True）
 - `--force-re-scrape`: 中間JSON があってもスクレイピングからやり直す（オプション）
+- `--log-dir`: ログ・レポートの出力先（デフォルト: `logs`）
 
 ### 5.2 処理フロー（擬似コード）
 
 ```
 1. load_config()  # .env 読み込み・APIキー検証
+   setup_logging(log_dir)  # logs/app.log の設定（try-except でガード）
 
 2. contest_id, start_index, end_index = CLI から取得
 
@@ -216,10 +261,12 @@ IntermediateProblem = {
        problems = [p for p in problems if p["id"] not in existing_ids]
 
 5. クローリング＋中間JSON
+   report_rows = []  # 各問の scrape_status, llm_status, error_message を収集
    for meta in problems:
-       (problem_statement_ja, editorial_text) = scrape_one_problem(meta)
-       has_official = editorial_text is not None
+       try: (problem_statement_ja, editorial_text) = scrape_one_problem(meta); scrape_status = "OK"
+       except Exception as e: scrape_status = "NG"; error_message = str(e); logger.exception(...)
        # 中間JSON に problem_statement_ja, editorial_text, has_official を保存
+       # console_info("[INFO] pid: Success") / console_error("[ERROR] pid: Failed at Scraping") は try-except でガード
        # 既に中間JSON があり --force-re-scrape でない場合はスキップ可
 
 6. LLM 抽出（未抽出分のみ or 全件）
@@ -242,7 +289,11 @@ IntermediateProblem = {
    metadatas = [ {"title": x["title"], "url": x["url"], "difficulty": x["difficulty"] } for x in to_upsert ]
    upsert_problems(collection, ids, documents, metadatas)
 
-8. 完了メッセージ（処理件数・スキップ数など）
+8. レポート書き出し
+   for each problem: db_upsert_status = "OK" if id in upserted_ids else "NG"
+   write_report_rows(report_rows, report_path)  # try-except でガード
+
+9. 完了メッセージ（処理件数・スキップ数・レポートパス）
 ```
 
 ### 5.3 フロー図（概要）
@@ -278,13 +329,14 @@ IntermediateProblem = {
 | 3 | Gemini に `google-genai` を使用（旧 `google.generativeai` は使わない） | `llm_extract.py`, `embedding_db.py` で `from google import genai` 等 |
 | 4 | ChromaDB Embedding の戻り値を `[e.values for e in response.embeddings]` に | `embedding_db.py` の `__call__` で厳守 |
 | 5 | API キーは `.env` から読み込み | `config.load_config()` と `os.environ.get("GEMINI_API_KEY")` |
+| 6 | ログ・レポートは Non-blocking | ログ／レポート／コンソール出力を `try-except` でガードし、失敗してもパイプラインを止めない |
 
 ---
 
 ## 7. まとめ
 
-- **モジュール**: `config`, `models`, `atcoder_metadata`, `scrape`, `llm_extract`, `embedding_db` を `src/` に配置し、`run_batch.py` が CLI からコンテスト・問題範囲を指定して一括実行する。
-- **データ**: 中間は 1問1JSON（`data/raw/{id}.json`）、ChromaDB は `./atcoder_rag_db`、ベクトル化テキストは title + algorithms + keywords + summary の結合、メタデータは title / url / difficulty を分離。
-- **制約**: スクレイピング間隔 2 秒・Accept-Language: ja・google-genai・Chroma のリスト内包戻り値・.env による API キー管理を設計に明示し、実装時に必ず満たす。
+- **モジュール**: `config`, `models`, `atcoder_metadata`, `scrape`, `llm_extract`, `embedding_db`, **`logging_report`** を `src/` に配置し、`run_batch.py` が CLI からコンテスト・問題範囲を指定して一括実行する。
+- **データ**: 中間は 1問1JSON（`data/raw/{id}.json`）、ChromaDB は `./atcoder_rag_db`、ベクトル化テキストは title + algorithms + keywords + summary の結合、メタデータは title / url / difficulty を分離。**ログ**は `logs/app.log`、**レポート**は `logs/report.jsonl`（1問1行・失敗ID抽出用）。
+- **制約**: スクレイピング間隔 2 秒・Accept-Language: ja・google-genai・Chroma のリスト内包戻り値・.env による API キー管理を設計に明示し、実装時に必ず満たす。**ログ・レポートは Non-blocking** とする。
 
 以上で、`make_DB_plan.md` を変更せず、実験コードをベースにした一括DB化パイプラインの設計書とする。
