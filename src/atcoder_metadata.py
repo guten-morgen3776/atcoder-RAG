@@ -1,4 +1,6 @@
 """AtCoder Problems API からメタデータ取得。"""
+import re
+
 import requests
 
 from src.config import PROBLEM_MODELS_URL, PROBLEMS_JSON_URL
@@ -56,4 +58,45 @@ def list_problems_in_range(
             )
         )
 
+    return result
+
+
+def get_target_abc_problems(
+    min_contest_number: int = 126,
+    start_index: str = "C",
+    end_index: str = "F",
+) -> list[ProblemMeta]:
+    """ABC の指定番号以降かつ問題インデックスが start_index〜end_index（例: C〜F）のメタデータを列挙する。
+    コンテスト番号昇順・問題インデックス昇順でソートして返す。"""
+    problems_data, models_data = fetch_problems_and_models()
+    result: list[ProblemMeta] = []
+
+    for p in problems_data:
+        contest_id = (p.get("contest_id") or "").lower()
+        m = re.match(r"^abc(\d+)$", contest_id)
+        if not m or int(m.group(1)) < min_contest_number:
+            continue
+        idx = p.get("problem_index", "")
+        if not _index_in_range(idx, start_index, end_index):
+            continue
+        problem_id = p["id"]
+        difficulty = models_data.get(problem_id, {}).get("difficulty")
+        url = f"https://atcoder.jp/contests/{contest_id}/tasks/{problem_id}"
+        result.append(
+            {
+                "id": problem_id,
+                "contest_id": contest_id,
+                "problem_index": idx,
+                "title": p["title"],
+                "url": url,
+                "difficulty": difficulty,
+            }
+        )
+
+    def _sort_key(meta: ProblemMeta) -> tuple[int, str]:
+        m = re.match(r"^abc(\d+)$", meta["contest_id"])
+        num = int(m.group(1)) if m else 0
+        return (num, meta["problem_index"])
+
+    result.sort(key=_sort_key)
     return result

@@ -21,6 +21,7 @@ DEFAULT_RAW_DATA_DIR = "data/raw"
 # ログ・レポート保存先
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_REPORT_FILENAME = "report.jsonl"
+DEFAULT_UPDATE_REPORT_FILENAME = "update_report.jsonl"
 
 
 def load_config() -> None:
