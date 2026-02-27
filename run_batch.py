@@ -149,7 +149,7 @@ def run(
                     console_error(f"[ERROR] {pid}: Failed at Scraping ({e!s})")
 
             if force_re_scrape or not intermediate.get("gemini_extract"):
-                time.sleep(4)  # Gemini API RPM 制限回避。スクレイプの有無に関わらず LLM 呼び出し直前に必ず待機（中間JSON からのリカバリー時も 4 秒間隔を保証）
+                time.sleep(1)  # Gemini API RPM 制限回避。スクレイプの有無に関わらず LLM 呼び出し直前に必ず待機（中間JSON からのリカバリー時も 4 秒間隔を保証）
                 try:
                     gemini_extract = extract_keywords_and_summary(
                     intermediate.get("problem_statement_ja", ""),

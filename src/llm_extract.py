@@ -1,6 +1,7 @@
 """Gemini（google-genai）でキーワード・要約を抽出。"""
 import json
 import time
+from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
@@ -9,6 +10,20 @@ from src.config import get_gemini_api_key
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
+# ---期待するJSONの構造（スキーマ）を定義 ---
+class ExtractionResult(BaseModel):
+    algorithms: list[str] = Field(
+        description="必要なアルゴリズムやデータ構造の配列（例: ['幅優先探索', '累積和', '動的計画法']）"
+    )
+    keywords: list[str] = Field(
+        description="問題のシチュエーションや制約を表すキーワードの配列（例: ['木構造', 'スライム', '最小値の最大化', 'N<=10^5']）"
+    )
+    time_complexity: str = Field(
+        description="想定解法の計算量（例: 'O(N log N)', 'O(N)'）"
+    )
+    summary: str = Field(
+        description="ユーザーが「曖昧な記憶（自然言語）」で検索した時にヒットしやすいような、問題の概要と解法の簡潔な要約（200文字程度）"
+    )
 
 def extract_keywords_and_summary(
     problem_statement_ja: str,
@@ -27,20 +42,13 @@ def extract_keywords_and_summary(
         )
 
     editorial_block = editorial_text if editorial_text else "（なし）"
+    
+    # プロンプトから「出力形式」の指定を削除（Pydanticスキーマで強制するため不要になります）
     prompt = f"""
 あなたは競技プログラミングの熟練者です。
 {context_msg}
 
-以下の要件に従い、RAGシステムでの検索に最適化されたJSON形式で出力してください。
-
-【抽出・推論要件】
-1. algorithms: 必要なアルゴリズムやデータ構造の配列（例: ["幅優先探索", "累積和", "動的計画法"]）
-2. keywords: 問題のシチュエーションや制約を表すキーワードの配列（例: ["木構造", "スライム", "最小値の最大化", "N<=10^5"]）
-3. time_complexity: 想定解法の計算量（例: "O(N log N)", "O(N)"）
-4. summary: ユーザーが「曖昧な記憶（自然言語）」で検索した時にヒットしやすいような、問題の概要と解法の簡潔な要約（200文字程度）
-
-【出力形式】
-必ず次のキーのみを持つJSONオブジェクトにしてください: algorithms, keywords, time_complexity, summary
+RAGシステムでの検索に最適化された情報を抽出してください。
 
 【データ】
 --- 問題文 ---
@@ -57,25 +65,33 @@ def extract_keywords_and_summary(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
+                    response_schema=ExtractionResult, # ★ここが超重要：定義したスキーマを渡す
+                    temperature=0.0, # ★追加：抽出タスクなので出力を決定論的に近づける
                 ),
             )
             text = response.text
             if not text or not text.strip():
                 return None
+                
+            # スキーマで強制されているため、ここでは確実にパース可能なJSONが返ってきます
             result = json.loads(text.strip())
-            # キー名を設計どおりに統一（complexity -> time_complexity）
-            if "complexity" in result and "time_complexity" not in result:
-                result["time_complexity"] = result.pop("complexity")
-            if not all(k in result for k in ("algorithms", "keywords", "time_complexity", "summary")):
-                return None
             return result
+            
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 print(f"\n[Rate limit] 429/RESOURCE_EXHAUSTED. Waiting 60s before retry (attempt {attempt + 1}/3)...")
                 time.sleep(60)
                 continue
-            print(f"\n[CRITICAL LLM ERROR] {type(e).__name__}: {e}")
+            
+            # JSONDecodeErrorが起きた場合のデバッグ用ログ（Structured Outputsを使えば基本起きません）
+            if isinstance(e, json.JSONDecodeError):
+                print(f"\n[CRITICAL LLM ERROR] JSON Parse Error: {e}")
+                print(f"Raw Output: {text}")
+            else:
+                print(f"\n[CRITICAL LLM ERROR] {type(e).__name__}: {e}")
+                
             return None
+            
     print("\n[CRITICAL LLM ERROR] Max retries (3) exceeded.")
     return None
