@@ -120,3 +120,99 @@ def run_search(
             "distance": dist,
         })
     return out
+
+
+def _get_algorithms_keywords_set(raw: IntermediateProblem | None) -> tuple[set[str], set[str]]:
+    """中間 JSON の gemini_extract からアルゴリズム・キーワードの set を返す。"""
+    if not raw:
+        return (set(), set())
+    g = raw.get("gemini_extract") or {}
+    algorithms = set(g.get("algorithms") or [])
+    keywords = set(g.get("keywords") or [])
+    return (algorithms, keywords)
+
+
+def search_similar_problems_by_id(
+    problem_id: str,
+    top_k: int,
+    diff_filter_on: bool,
+    min_diff: int,
+    max_diff: int,
+    db_path: str = DEFAULT_DB_PATH,
+    raw_data_dir: str = DEFAULT_RAW_DATA_DIR,
+) -> list[dict]:
+    """
+    問題 ID を基準に類題を検索する。
+    存在チェック → ベクトル取得 → query → 自己除外 → 難易度フィルタ → 整形。
+    返却リストの各要素は run_search と同形式に加え、common_algorithms, common_keywords を付与。
+    未収録時は空リストを返す。
+    """
+    client = get_chroma_client(db_path)
+    emb_fn = GeminiChromaEmbeddingFunction()
+    collection = client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        embedding_function=emb_fn,
+    )
+
+    # 存在チェック
+    exist = collection.get(ids=[problem_id], include=[])
+    if not exist["ids"]:
+        return []
+
+    # 基準ベクトル取得
+    with_emb = collection.get(ids=[problem_id], include=["embeddings"])
+    embeddings = with_emb.get("embeddings")
+    if embeddings is None or len(embeddings) == 0:
+        return []
+    first_emb = embeddings[0]
+    if first_emb is None:
+        return []
+    query_vector = list(first_emb)
+    if len(query_vector) == 0:
+        return []
+
+    n_results = FETCH_SIZE_WHEN_FILTER if diff_filter_on else top_k + 1
+    result = collection.query(
+        query_embeddings=[query_vector],
+        n_results=n_results,
+        include=["metadatas", "distances"],
+    )
+
+    ids = result["ids"][0] if result["ids"] else []
+    metadatas = result["metadatas"][0] if result["metadatas"] else []
+    distances = result["distances"][0] if result["distances"] else []
+
+    # 自己除外（1件目が基準問題のため除外）
+    rows: list[tuple[str, dict, float]] = []
+    for pid, meta, dist in zip(ids, metadatas, distances):
+        if pid == problem_id:
+            continue
+        meta = meta or {}
+        diff_val = _parse_difficulty(meta)
+        if diff_filter_on:
+            if diff_val is None or diff_val < min_diff or diff_val > max_diff:
+                continue
+        rows.append((pid, meta, dist))
+
+    rows = rows[:top_k]
+
+    base_raw = _load_raw_json(problem_id, raw_data_dir)
+    base_alg, base_kw = _get_algorithms_keywords_set(base_raw)
+
+    out: list[dict] = []
+    for pid, meta, dist in rows:
+        raw = _load_raw_json(pid, raw_data_dir)
+        alg_set, kw_set = _get_algorithms_keywords_set(raw)
+        common_alg = sorted(base_alg & alg_set)
+        common_kw = sorted(base_kw & kw_set)
+        out.append({
+            "id": pid,
+            "title": meta.get("title", "—"),
+            "url": meta.get("url", ""),
+            "difficulty": _parse_difficulty(meta),
+            "algorithms_keywords": _format_algorithms_keywords(raw),
+            "distance": dist,
+            "common_algorithms": common_alg,
+            "common_keywords": common_kw,
+        })
+    return out

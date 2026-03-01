@@ -1,4 +1,5 @@
 """ChromaDB 用 Embedding 関数と DB 操作。google-genai, 戻り値は [e.values for e in response.embeddings]。"""
+import re
 from typing import Any
 
 import chromadb
@@ -65,6 +66,60 @@ def get_existing_ids(collection: chromadb.Collection) -> set[str]:
     """既存のドキュメント id 一覧を返す（差分更新用）。"""
     data = collection.get(include=[])
     return set(data["ids"])
+
+
+# 問題インデックスの表示順（A, B, C, D, E, F, G, Ex）
+_PROBLEM_INDEX_ORDER = ("a", "b", "c", "d", "e", "f", "g", "ex")
+
+
+def get_db_status(collection: chromadb.Collection) -> dict[str, Any]:
+    """
+    UI 用に収録データの件数・コンテスト範囲・収録大問を返す。
+
+    Returns:
+        count: 収録問題数
+        range_text: 例 "ABC126 〜 ABC350"（複数種別の場合は "ABC126 〜 ABC350, ARC100 〜 ARC120" など）
+        problem_indices: 収録されている大問のリスト（例: ["C", "D", "E", "F"]）、表示用に大文字でソート済み
+    """
+    data = collection.get(include=[])
+    ids = data["ids"] or []
+    count = len(ids)
+
+    # id は "abc126_c" 形式 → contest_id "abc126", index "c"
+    contest_nums: dict[str, list[int]] = {}  # prefix -> [num, ...]
+    indices_set: set[str] = set()
+
+    for pid in ids:
+        if not pid or "_" not in pid:
+            continue
+        last_underscore = pid.rfind("_")
+        contest_id = pid[:last_underscore]
+        idx = pid[last_underscore + 1 :].lower()
+        indices_set.add(idx)
+        # contest_id を prefix + number に分解（abc126 -> abc, 126）
+        m = re.match(r"^([a-z]+)(\d+)$", contest_id)
+        if m:
+            prefix, num_str = m.group(1), m.group(2)
+            contest_nums.setdefault(prefix, []).append(int(num_str))
+
+    range_parts = []
+    for prefix in sorted(contest_nums.keys()):
+        nums = contest_nums[prefix]
+        if not nums:
+            continue
+        label = prefix.upper()
+        range_parts.append(f"{label}{min(nums)} 〜 {label}{max(nums)}")
+    range_text = ", ".join(range_parts) if range_parts else "—"
+
+    # 大問を A,B,C,D,E,F,G,Ex の順でソート
+    ordered = [x for x in _PROBLEM_INDEX_ORDER if x in indices_set]
+    problem_indices = [s.upper() for s in ordered]
+
+    return {
+        "count": count,
+        "range_text": range_text,
+        "problem_indices": problem_indices,
+    }
 
 
 def _metadata_row(title: str, url: str, difficulty: int | None) -> dict[str, Any]:
