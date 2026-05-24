@@ -3,6 +3,7 @@
 
 # --- 2. データベースファイル ---
 atcoder_rag_db/
+atcoder_rag_db_backup_*.tar.gz
 
 # --- 3. 大容量のデータファイル ---
 data/raw/

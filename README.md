@@ -71,3 +71,29 @@ flowchart LR
 - `.env` に `GEMINI_API_KEY` を設定する。
 - 初回は `run_batch.py` で DB を構築してから、`streamlit run app.py` で検索 UI を起動する。
 - 依存は `requirements.txt` を参照。
+
+---
+
+## モバイル・外部公開（どの端末からでもアクセス）
+
+ローカルだけでなく、認証付き HTTPS でどの端末のブラウザからでも使えるよう公開している。
+
+- **公開 URL**: `https://rag.atcoder-rag.com`（独自ドメイン）
+- **構成**: 自宅 Mac + Cloudflare Tunnel + Cloudflare Access（B 案）
+  - Streamlit は `127.0.0.1:8501` のみで listen し、外部へは直接公開しない。
+  - 外部アクセスは Cloudflare Tunnel（`cloudflared`）経由のみ。ルータのポート開放は不要。
+  - Cloudflare Access で認証し、許可した Google アカウントのみ到達できる（API キーの不正利用を防止）。
+- **常駐**: `launchd`（`~/Library/LaunchAgents/com.atcoder-rag.streamlit.plist` / `com.atcoder-rag.cloudflared.plist`）で Mac ログイン時に自動起動・自動再起動。
+- **UI**: スマホ向けに `layout="centered"`、検索オプションは折り畳み式 `expander`、Difficulty 入力は 2 カラム表示。
+- 詳細な構築手順・運用コマンドは [`docs/mobile_deployment_plan.md`](docs/mobile_deployment_plan.md) を参照。
+
+### 運用メモ
+
+| 操作 | コマンド |
+|------|---------|
+| 状態確認 | `launchctl list \| grep atcoder-rag` |
+| 公開停止 / 再開 | `launchctl unload`（または `load`） `~/Library/LaunchAgents/com.atcoder-rag.cloudflared.plist` |
+| コード更新の反映 | `launchctl kickstart -k gui/$(id -u)/com.atcoder-rag.streamlit` |
+| DB バックアップ | `tar -czf atcoder_rag_db_backup_$(date +%Y%m%d).tar.gz atcoder_rag_db/` |
+
+> 注: `launchd` の LaunchAgent はユーザーの GUI ログイン後に起動する。Mac 再起動時に無人で立ち上げたい場合は LaunchDaemon 化が必要。

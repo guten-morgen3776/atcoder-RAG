@@ -36,7 +36,7 @@ def _format_algorithms_keywords_with_highlight(
 
 
 def main() -> None:
-    st.set_page_config(page_title="AtCoder-RAG 検索", layout="wide")
+    st.set_page_config(page_title="AtCoder-RAG 検索", layout="centered")
     try:
         load_config()
     except ValueError as e:
@@ -61,12 +61,14 @@ def main() -> None:
     tab_kw, tab_similar = st.tabs(["キーワードから検索", "問題番号から類題検索"])
 
     with tab_kw:
-        with st.sidebar:
-            st.subheader("検索設定")
+        with st.expander("検索設定", expanded=False):
             use_ai_expand = st.checkbox("AI クエリ拡張", value=True)
             diff_filter_on = st.checkbox("Difficulty で絞り込む", value=True)
-            min_diff = st.number_input("Difficulty 最小値", value=300, step=50)
-            max_diff = st.number_input("Difficulty 最大値", value=700, step=50)
+            col_min, col_max = st.columns(2)
+            with col_min:
+                min_diff = st.number_input("Difficulty 最小値", value=300, step=50)
+            with col_max:
+                max_diff = st.number_input("Difficulty 最大値", value=700, step=50)
             top_k = st.number_input("検索件数（トップK）", value=5, min_value=1, max_value=20, step=1)
 
         query = st.text_input("検索キーワード", placeholder="例: ダイクストラ 最短経路", key="kw_query")
@@ -107,8 +109,11 @@ def main() -> None:
             key="sim_index",
         )
         diff_filter_on_sim = st.checkbox("Difficulty で絞り込む", value=True, key="sim_diff_on")
-        min_diff_sim = st.number_input("Difficulty 最小値", value=300, step=50, key="sim_min_diff")
-        max_diff_sim = st.number_input("Difficulty 最大値", value=700, step=50, key="sim_max_diff")
+        col_min_sim, col_max_sim = st.columns(2)
+        with col_min_sim:
+            min_diff_sim = st.number_input("Difficulty 最小値", value=300, step=50, key="sim_min_diff")
+        with col_max_sim:
+            max_diff_sim = st.number_input("Difficulty 最大値", value=700, step=50, key="sim_max_diff")
         top_k_sim = st.number_input(
             "検索件数（トップK）",
             value=5,
